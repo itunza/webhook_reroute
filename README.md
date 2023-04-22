@@ -19,11 +19,11 @@ The Webhook Re-Route application is a simple service that accepts incoming HTTP 
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/webhook-rewrite.git
+   git clone https://github.com/itunzae/webhook_reroute.git
    ```
 2. Change to the project directory:
    ```
-   cd webhook-rewrite
+   cd webhook_reroute
    ```
 
 ### Configuration
