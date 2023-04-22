@@ -7,21 +7,37 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
+
+	"crypto/rand"
+	"encoding/hex"
 
 	"github.com/joho/godotenv"
 )
 
-const maxConcurrentRequests = 100
-
-var sem = make(chan struct{}, maxConcurrentRequests)
-
-func main() {
+// init funct
+func init() {
+	// Load the .env file
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
+}
+
+const maxConcurrentRequests = 100
+
+var sem = make(chan struct{}, maxConcurrentRequests)
+var linkToURLMap = make(map[string]string)
+
+// var urlMap = make(map[string]string)
+
+func main() {
+
 	http.HandleFunc("/webhook", webhookHandler)
 	http.HandleFunc("/createPo", webhookHandlerPurchaseInvoice)
+	http.Handle("/", http.FileServer(http.Dir("./")))
+	http.HandleFunc("/add-url", addURLHandler)
+	http.HandleFunc("/forward/", forwardHandler)
 	log.Fatal(http.ListenAndServe(":8088", nil))
 }
 
@@ -63,11 +79,6 @@ func processRequest(destinationURL string, data map[string]interface{}, w http.R
 		return
 	}
 	log.Println("Response body:", string(respBody))
-
-	// Respond to the caller with a 200 OK status and a JSON message
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "OK"})
 }
 
 func webhookHandlerPurchaseInvoice(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +109,90 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check the Content-Type header
+	contentType := r.Header.Get("Content-Type")
+
+	var data map[string]interface{}
+
+	if strings.Contains(contentType, "application/json") {
+		// Read and decode the JSON request body
+		err := json.NewDecoder(r.Body).Decode(&data)
+		defer r.Body.Close()
+		if err != nil {
+			http.Error(w, "Error decoding request body", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Assume the request body is form data and parse it
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, "Error parsing form data", http.StatusInternalServerError)
+			return
+		}
+
+		// Convert the form data to a map[string]interface{}
+		data = make(map[string]interface{})
+		for key, values := range r.Form {
+			if len(values) > 0 {
+				data[key] = values[0]
+			}
+		}
+	}
+
+	sem <- struct{}{} // Acquire the semaphore
+	go processRequest(destinationURL, data, w)
+}
+
+
+func addURLHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Read and decode the request body
+	var requestData map[string]string
+	err := json.NewDecoder(r.Body).Decode(&requestData)
+	defer r.Body.Close()
+	if err != nil {
+		http.Error(w, "Error decoding request body", http.StatusInternalServerError)
+		return
+	}
+
+	url := requestData["url"]
+	if url == "" {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+
+	// Generate a unique link
+	uniqueLink := generateUniqueLink()
+
+	// Store the mapping
+	linkToURLMap[uniqueLink] = url
+
+	// Generate the full URL
+	fullURL := os.Getenv("HOST") + ":" + os.Getenv("PORT") + "/forward/" + uniqueLink
+
+	// Respond to the caller with a 200 OK status and a JSON message
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"unique_link": uniqueLink, "full_url": fullURL, "message": "URL added"})
+}
+
+func forwardHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	uniqueLink := strings.TrimPrefix(r.URL.Path, "/forward/")
+	destinationURL, ok := linkToURLMap[uniqueLink]
+	if !ok {
+		http.Error(w, "Invalid unique link", http.StatusNotFound)
+		return
+	}
+
 	// Read and decode the request body
 	var data map[string]interface{}
 	err := json.NewDecoder(r.Body).Decode(&data)
@@ -109,4 +204,10 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 
 	sem <- struct{}{} // Acquire the semaphore
 	go processRequest(destinationURL, data, w)
+}
+
+func generateUniqueLink() string {
+	key := make([]byte, 8)
+	rand.Read(key)
+	return hex.EncodeToString(key)
 }
