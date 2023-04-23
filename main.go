@@ -32,12 +32,20 @@ var linkToURLMap = make(map[string]string)
 // var urlMap = make(map[string]string)
 
 func main() {
+	_, err := loadURLsFromFile("urls.json")
+	if err != nil {
+		log.Println("Error loading URLs from file:", err)
+	}
 
 	http.HandleFunc("/webhook", webhookHandler)
 	http.HandleFunc("/createPo", webhookHandlerPurchaseInvoice)
 	http.HandleFunc("/add-url", addURLHandler)
 	http.HandleFunc("/forward/", forwardHandler)
 	log.Fatal(http.ListenAndServe(":8088", nil))
+
+	// Load the URLs from the JSON file
+	// Load the URLs from the JSON file
+
 }
 
 func processRequest(destinationURL string, data map[string]interface{}, w http.ResponseWriter) {
@@ -169,8 +177,15 @@ func addURLHandler(w http.ResponseWriter, r *http.Request) {
 	// Store the mapping
 	linkToURLMap[uniqueLink] = url
 
+	// Save the updated linkToURLMap to the JSON file
+	err = saveURLsToFile("urls.json", linkToURLMap)
+	if err != nil {
+		http.Error(w, "Error saving URLs to file", http.StatusInternalServerError)
+		return
+	}
+
 	// Generate the full URL
-	fullURL := os.Getenv("HOST") + ":" + os.Getenv("PORT") + "/forward/" + uniqueLink
+	fullURL := os.Getenv("HOST") + "/forward/" + uniqueLink
 
 	// Respond to the caller with a 200 OK status and a JSON message
 	w.Header().Set("Content-Type", "application/json")
@@ -208,4 +223,33 @@ func generateUniqueLink() string {
 	key := make([]byte, 8)
 	rand.Read(key)
 	return hex.EncodeToString(key)
+}
+
+func saveURLsToFile(filename string, urlMap map[string]string) error {
+	urlsJSON, err := json.Marshal(urlMap)
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile(filename, urlsJSON, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func loadURLsFromFile(filename string) (map[string]string, error) {
+	urlsJSON, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var urlMap map[string]string
+	err = json.Unmarshal(urlsJSON, &urlMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return urlMap, nil
 }
