@@ -35,7 +35,6 @@ func main() {
 
 	http.HandleFunc("/webhook", webhookHandler)
 	http.HandleFunc("/createPo", webhookHandlerPurchaseInvoice)
-	http.Handle("/", http.FileServer(http.Dir("./")))
 	http.HandleFunc("/add-url", addURLHandler)
 	http.HandleFunc("/forward/", forwardHandler)
 	log.Fatal(http.ListenAndServe(":8088", nil))
@@ -45,7 +44,7 @@ func processRequest(destinationURL string, data map[string]interface{}, w http.R
 	defer func() { <-sem }() // Release the semaphore when the function returns
 
 	// Encode the JSON data
-	jsonData, err := json.Marshal(data)
+	jsonData, err := json.Marshal([]interface{}{data})
 	if err != nil {
 		http.Error(w, "Error encoding JSON data", http.StatusInternalServerError)
 		return
@@ -142,7 +141,6 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	sem <- struct{}{} // Acquire the semaphore
 	go processRequest(destinationURL, data, w)
 }
-
 
 func addURLHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
